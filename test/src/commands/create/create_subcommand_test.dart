@@ -9,8 +9,13 @@ import 'package:path/path.dart' as path;
 import 'package:test/test.dart';
 import 'package:very_good_cli/src/commands/create/commands/create_subcommand.dart';
 import 'package:very_good_cli/src/commands/create/templates/template.dart';
+import 'package:very_good_cli/src/github/github.dart';
 
 class _MockTemplate extends Mock implements Template {}
+
+class _MockGitRootDetector extends Mock implements GitRootDetector {}
+
+class _MockGithubIntegrator extends Mock implements GithubIntegrator {}
 
 class _MockLogger extends Mock implements Logger {}
 
@@ -34,6 +39,8 @@ class _TestCreateSubCommand extends CreateSubCommand {
     required this.template,
     required super.logger,
     required super.generatorFromBundle,
+    super.gitRootDetector,
+    super.githubIntegrator,
   });
 
   @override
@@ -645,6 +652,168 @@ See https://dart.dev/tools/pub/pubspec#name for more information.'''),
           logger: logger,
         ),
       ).called(1);
+    });
+  });
+
+  group('github integration', () {
+    late Template template;
+    late _MockBundle bundle;
+    late GeneratorHooks hooks;
+    late MasonGenerator generator;
+    late _MockGitRootDetector gitRootDetector;
+    late _MockGithubIntegrator githubIntegrator;
+    late Directory repositoryRoot;
+
+    setUp(() {
+      bundle = _MockBundle();
+      when(() => bundle.name).thenReturn('test');
+      when(() => bundle.description).thenReturn('Test bundle');
+      when(() => bundle.version).thenReturn('<bundleversion>');
+      template = _MockTemplate();
+      when(() => template.name).thenReturn('test');
+      when(() => template.bundle).thenReturn(bundle);
+      when(
+        () => template.onGenerateComplete(any(), any()),
+      ).thenAnswer((_) async {});
+
+      hooks = _MockGeneratorHooks();
+      generator = _MockMasonGenerator();
+      when(() => generator.hooks).thenReturn(hooks);
+      when(() => generator.id).thenReturn('generator_id');
+      when(() => generator.description).thenReturn('generator description');
+      when(
+        () => hooks.preGen(
+          vars: any(named: 'vars'),
+          onVarsChanged: any(named: 'onVarsChanged'),
+        ),
+      ).thenAnswer((_) async {});
+      when(
+        () => generator.generate(
+          any(),
+          vars: any(named: 'vars'),
+          logger: any(named: 'logger'),
+        ),
+      ).thenAnswer((_) async => generatedFiles);
+
+      gitRootDetector = _MockGitRootDetector();
+      githubIntegrator = _MockGithubIntegrator();
+      repositoryRoot = Directory.systemTemp.createTempSync('vg_repo_');
+      addTearDown(() => repositoryRoot.deleteSync(recursive: true));
+    });
+
+    _TestCommandRunner buildRunner() => _TestCommandRunner(
+      command: _TestCreateSubCommand(
+        template: template,
+        logger: logger,
+        generatorFromBundle: (_) async => generator,
+        gitRootDetector: gitRootDetector,
+        githubIntegrator: githubIntegrator,
+      ),
+    );
+
+    test(
+      'integrates the .github directory when generated inside a repository',
+      () async {
+        when(() => gitRootDetector.detect(any())).thenReturn(repositoryRoot);
+        final summary = GithubIntegrationSummary()
+          ..moved.add('.github/workflows/test_project.yaml')
+          ..merged.add('.github/dependabot.yaml')
+          ..overwritten.add('.github/PULL_REQUEST_TEMPLATE.md')
+          ..warnings.add('Could not parse .github/cspell.json.');
+        when(
+          () => githubIntegrator.integrate(
+            packageDirectory: any(named: 'packageDirectory'),
+            repositoryRoot: any(named: 'repositoryRoot'),
+            projectName: any(named: 'projectName'),
+          ),
+        ).thenReturn(summary);
+
+        final result = await buildRunner().run([
+          'create_subcommand',
+          'test_project',
+        ]);
+
+        expect(result, equals(ExitCode.success.code));
+        verify(
+          () => githubIntegrator.integrate(
+            packageDirectory: any(named: 'packageDirectory'),
+            repositoryRoot: repositoryRoot,
+            projectName: 'test_project',
+          ),
+        ).called(1);
+        verify(
+          () => logger.info(
+            any(that: contains('Configured GitHub metadata')),
+          ),
+        ).called(1);
+        verify(
+          () => logger.info(
+            any(that: contains('overwrote .github/PULL_REQUEST_TEMPLATE.md')),
+          ),
+        ).called(1);
+        verify(
+          () => logger.warn('Could not parse .github/cspell.json.'),
+        ).called(1);
+      },
+    );
+
+    test('does nothing when not inside a git repository', () async {
+      when(() => gitRootDetector.detect(any())).thenReturn(null);
+
+      final result = await buildRunner().run([
+        'create_subcommand',
+        'test_project',
+      ]);
+
+      expect(result, equals(ExitCode.success.code));
+      verifyNever(
+        () => githubIntegrator.integrate(
+          packageDirectory: any(named: 'packageDirectory'),
+          repositoryRoot: any(named: 'repositoryRoot'),
+          projectName: any(named: 'projectName'),
+        ),
+      );
+    });
+
+    test('does nothing when the project is the repository root', () async {
+      when(
+        () => gitRootDetector.detect(any()),
+      ).thenReturn(Directory('test_project'));
+
+      final result = await buildRunner().run([
+        'create_subcommand',
+        'test_project',
+      ]);
+
+      expect(result, equals(ExitCode.success.code));
+      verifyNever(
+        () => githubIntegrator.integrate(
+          packageDirectory: any(named: 'packageDirectory'),
+          repositoryRoot: any(named: 'repositoryRoot'),
+          projectName: any(named: 'projectName'),
+        ),
+      );
+    });
+
+    test('stays silent when there is nothing to integrate', () async {
+      when(() => gitRootDetector.detect(any())).thenReturn(repositoryRoot);
+      when(
+        () => githubIntegrator.integrate(
+          packageDirectory: any(named: 'packageDirectory'),
+          repositoryRoot: any(named: 'repositoryRoot'),
+          projectName: any(named: 'projectName'),
+        ),
+      ).thenReturn(GithubIntegrationSummary());
+
+      final result = await buildRunner().run([
+        'create_subcommand',
+        'test_project',
+      ]);
+
+      expect(result, equals(ExitCode.success.code));
+      verifyNever(
+        () => logger.info(any(that: contains('Configured GitHub metadata'))),
+      );
     });
   });
 

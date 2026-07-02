@@ -49,8 +49,10 @@ dart pub global run very_good_cli:very_good <command> <args>
 Create a very good project in seconds based on the provided template. Each template has a corresponding sub-command (e.g.,`very_good create flutter_app` will generate a Flutter starter app).
 
 > 🆕 **Monorepo support**: generate any project pre-configured as a pub
-> workspace member with the opt-in `--workspace` flag. See
-> [Workspaces](#workspaces) below.
+> workspace member with the opt-in `--workspace` flag, and when generating
+> inside an existing repository the GitHub metadata (workflows, dependabot,
+> cspell) is integrated at the repository root automatically. See
+> [Workspaces](#workspaces) and [Monorepos](#monorepos) below.
 
 ![Very Good Create][very_good_create]
 
@@ -125,6 +127,17 @@ Generate any project pre-configured as a member of a [pub workspace][pub_workspa
 very_good create dart_package my_package -o packages --workspace
 very_good create flutter_app my_app -o apps --workspace
 ```
+
+#### Monorepos
+
+When a project is generated inside an existing git repository (e.g. a monorepo), its GitHub metadata is automatically integrated at the repository root — where GitHub actually reads it — resolving conflicts with any existing files:
+
+- Workflows are renamed after the project (`main.yaml` becomes `<project_name>.yaml`) and scoped to the package directory (path filters + `working_directory` inputs).
+- `dependabot.yaml` keeps its existing entries and gains new ones pointing at the package directory.
+- `cspell.json` merges the Very Good dictionaries and the project name into the existing configuration.
+- `PULL_REQUEST_TEMPLATE.md` and `ISSUE_TEMPLATE/*` are overwritten — review the diff and commit or revert.
+
+Nothing happens when the project is generated outside a git repository or is the repository root itself.
 
 ---
 

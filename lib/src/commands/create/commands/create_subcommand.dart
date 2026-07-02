@@ -8,6 +8,7 @@ import 'package:meta/meta.dart';
 import 'package:path/path.dart' as path;
 import 'package:very_good_cli/src/commands/commands.dart';
 import 'package:very_good_cli/src/commands/create/templates/templates.dart';
+import 'package:very_good_cli/src/github/github.dart';
 
 // A valid Dart identifier that can be used for a package, i.e. no
 // capital letters.
@@ -47,7 +48,11 @@ abstract class CreateSubCommand extends Command<int> {
   CreateSubCommand({
     required this.logger,
     @visibleForTesting required MasonGeneratorFromBundle? generatorFromBundle,
-  }) : _generatorFromBundle = generatorFromBundle ?? MasonGenerator.fromBundle {
+    @visibleForTesting GitRootDetector? gitRootDetector,
+    @visibleForTesting GithubIntegrator? githubIntegrator,
+  }) : _generatorFromBundle = generatorFromBundle ?? MasonGenerator.fromBundle,
+       _gitRootDetector = gitRootDetector ?? const GitRootDetector(),
+       _githubIntegrator = githubIntegrator ?? const GithubIntegrator() {
     argParser
       ..addOption(
         'output-directory',
@@ -111,6 +116,8 @@ abstract class CreateSubCommand extends Command<int> {
   /// The logger user to notify the user of the command's progress.
   final Logger logger;
   final MasonGeneratorFromBundle _generatorFromBundle;
+  final GitRootDetector _gitRootDetector;
+  final GithubIntegrator _githubIntegrator;
 
   /// Whether the generated project should be pre-configured as a member of a
   /// [pub workspace][1].
@@ -241,7 +248,48 @@ abstract class CreateSubCommand extends Command<int> {
 
     await template.onGenerateComplete(logger, outputDirectory);
 
+    _integrateGithubDirectory();
+
     return ExitCode.success.code;
+  }
+
+  /// Relocates the generated `.github` directory to the root of the
+  /// surrounding git repository, if any.
+  ///
+  /// GitHub only executes workflows from the repository root, so when the
+  /// project is generated inside an existing repository (e.g. a monorepo) its
+  /// GitHub metadata is integrated at the root, resolving conflicts with any
+  /// existing files. No-op when the project is not inside a git repository or
+  /// is the repository root itself.
+  void _integrateGithubDirectory() {
+    final gitRoot = _gitRootDetector.detect(outputDirectory);
+    if (gitRoot == null) return;
+
+    final rootPath = path.canonicalize(gitRoot.path);
+    if (rootPath == path.canonicalize(outputDirectory.absolute.path)) return;
+
+    final summary = _githubIntegrator.integrate(
+      packageDirectory: outputDirectory,
+      repositoryRoot: gitRoot,
+      projectName: projectName,
+    );
+    if (summary.isEmpty) return;
+
+    logger.info(
+      'Configured GitHub metadata at the repository root ($rootPath).',
+    );
+    for (final file in summary.moved) {
+      logger.detail('  created $file');
+    }
+    for (final file in summary.merged) {
+      logger.detail('  merged $file');
+    }
+    for (final file in summary.overwritten) {
+      logger.info(
+        '  overwrote $file (review the change and commit or revert it)',
+      );
+    }
+    summary.warnings.forEach(logger.warn);
   }
 
   /// Responsible for returns the template parameters to be passed to the

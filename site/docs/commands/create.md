@@ -97,3 +97,25 @@ and monorepo tools built on top of them (e.g. melos):
 very_good create dart_package my_package -o packages --workspace
 very_good create flutter_app  my_app     -o apps     --workspace
 ```
+
+## Monorepos
+
+When a project is generated inside an existing git repository (e.g. a
+monorepo), its GitHub metadata is automatically integrated at the repository
+root — where GitHub actually reads it — resolving conflicts with any existing
+files:
+
+- Workflows are renamed after the project (`main.yaml` becomes
+  `<project_name>.yaml`, with `_1`, `_2`… suffixes on residual conflicts) and
+  scoped to the package directory via path filters and `working_directory`
+  inputs.
+- `dependabot.yaml` keeps its existing entries and gains new ones pointing at
+  the package directory (`enable-beta-ecosystems` is enabled when required).
+- `cspell.json` merges the Very Good dictionaries and the project name into
+  the existing configuration.
+- `PULL_REQUEST_TEMPLATE.md` and `ISSUE_TEMPLATE/*` are overwritten — review
+  the diff and commit or revert.
+
+Nothing happens when the project is generated outside a git repository or is
+the repository root itself.
+
