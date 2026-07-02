@@ -9,13 +9,8 @@ import 'package:path/path.dart' as path;
 import 'package:test/test.dart';
 import 'package:very_good_cli/src/commands/create/commands/create_subcommand.dart';
 import 'package:very_good_cli/src/commands/create/templates/template.dart';
-import 'package:very_good_cli/src/workspace/workspace.dart';
 
 class _MockTemplate extends Mock implements Template {}
-
-class _MockWorkspaceDetector extends Mock implements WorkspaceDetector {}
-
-class _MockWorkspaceIntegrator extends Mock implements WorkspaceIntegrator {}
 
 class _MockLogger extends Mock implements Logger {}
 
@@ -34,15 +29,11 @@ class _FakeDirectoryGeneratorTarget extends Fake
 
 class _FakeDirectory extends Fake implements Directory {}
 
-class _FakeFile extends Fake implements File {}
-
 class _TestCreateSubCommand extends CreateSubCommand {
   _TestCreateSubCommand({
     required this.template,
     required super.logger,
     required super.generatorFromBundle,
-    super.workspaceDetector,
-    super.workspaceIntegrator,
   });
 
   @override
@@ -53,19 +44,6 @@ class _TestCreateSubCommand extends CreateSubCommand {
 
   @override
   final Template template;
-}
-
-class _TestCreateSubCommandNoWorkspace extends _TestCreateSubCommand {
-  _TestCreateSubCommandNoWorkspace({
-    required super.template,
-    required super.logger,
-    required super.generatorFromBundle,
-    super.workspaceDetector,
-    super.workspaceIntegrator,
-  });
-
-  @override
-  bool get registersInWorkspace => false;
 }
 
 class _TestCreateSubCommandWithOrgName extends _TestCreateSubCommand
@@ -124,7 +102,6 @@ void main() {
     registerFallbackValue(_FakeDirectoryGeneratorTarget());
     registerFallbackValue(_FakeLogger());
     registerFallbackValue(_FakeDirectory());
-    registerFallbackValue(_FakeFile());
   });
 
   setUp(() {
@@ -147,7 +124,7 @@ Usage: very_good create create_subcommand <project-name> [arguments]
 -o, --output-directory    The desired output directory when creating a new project.
     --description         The description for this new project.
                           (defaults to "A Very Good Project created by Very Good CLI.")
-    --[no-]workspace      Register the new package in the surrounding pub workspace.
+    --[no-]workspace      Generate the project pre-configured as a pub workspace member.
 
 Run "runner help" to see global options.''';
 
@@ -275,6 +252,7 @@ Run "runner help" to see global options.''';
                     'project_name': expectedProjectName,
                     'description':
                         'A Very Good Project created by Very Good CLI.',
+                    'workspace': false,
                   },
                   onVarsChanged: any(named: 'onVarsChanged'),
                 ),
@@ -294,6 +272,7 @@ Run "runner help" to see global options.''';
                   'project_name': 'name',
                   'description':
                       'A Very Good Project created by Very Good CLI.',
+                  'workspace': false,
                 },
                 onVarsChanged: any(named: 'onVarsChanged'),
               ),
@@ -317,6 +296,7 @@ Run "runner help" to see global options.''';
                   'project_name': expectedProjectName,
                   'description':
                       'A Very Good Project created by Very Good CLI.',
+                  'workspace': false,
                 },
                 onVarsChanged: any(named: 'onVarsChanged'),
               ),
@@ -337,6 +317,7 @@ Run "runner help" to see global options.''';
                   'project_name': expectedProjectName,
                   'description':
                       'A Very Good Project created by Very Good CLI.',
+                  'workspace': false,
                 },
                 logger: logger,
               ),
@@ -378,6 +359,7 @@ Run "runner help" to see global options.''';
               vars: <String, dynamic>{
                 'project_name': 'test_project',
                 'description': 'A Very Good Project created by Very Good CLI.',
+                'workspace': false,
               },
               onVarsChanged: any(named: 'onVarsChanged'),
             );
@@ -397,6 +379,7 @@ Run "runner help" to see global options.''';
               vars: <String, dynamic>{
                 'project_name': 'test_project',
                 'description': 'A Very Good Project created by Very Good CLI.',
+                'workspace': false,
               },
               logger: logger,
             ),
@@ -553,6 +536,7 @@ See https://dart.dev/tools/pub/pubspec#name for more information.'''),
               vars: <String, dynamic>{
                 'project_name': 'test_project',
                 'description': 'A Very Good Project created by Very Good CLI.',
+                'workspace': false,
               },
               logger: logger,
             ),
@@ -602,13 +586,11 @@ See https://dart.dev/tools/pub/pubspec#name for more information.'''),
     });
   });
 
-  group('workspace registration', () {
+  group('workspace flag', () {
     late Template template;
     late _MockBundle bundle;
     late GeneratorHooks hooks;
     late MasonGenerator generator;
-    late _MockWorkspaceDetector detector;
-    late _MockWorkspaceIntegrator integrator;
 
     setUp(() {
       bundle = _MockBundle();
@@ -640,119 +622,29 @@ See https://dart.dev/tools/pub/pubspec#name for more information.'''),
           logger: any(named: 'logger'),
         ),
       ).thenAnswer((_) async => generatedFiles);
-
-      detector = _MockWorkspaceDetector();
-      integrator = _MockWorkspaceIntegrator();
-      when(() => integrator.ensureWorkspaceResolution(any())).thenReturn(true);
     });
 
-    _TestCommandRunner buildRunner({bool registersInWorkspace = true}) {
-      final command = registersInWorkspace
-          ? _TestCreateSubCommand(
-              template: template,
-              logger: logger,
-              generatorFromBundle: (_) async => generator,
-              workspaceDetector: detector,
-              workspaceIntegrator: integrator,
-            )
-          : _TestCreateSubCommandNoWorkspace(
-              template: template,
-              logger: logger,
-              generatorFromBundle: (_) async => generator,
-              workspaceDetector: detector,
-              workspaceIntegrator: integrator,
-            );
-      return _TestCommandRunner(command: command);
-    }
-
-    test('registers the package and logs when inside a workspace', () async {
-      when(
-        () => detector.detect(any()),
-      ).thenReturn(const WorkspaceContext(rootPath: '/ws', members: []));
-      when(
-        () => integrator.addPackage(
-          workspaceRoot: any(named: 'workspaceRoot'),
-          packageDirectory: any(named: 'packageDirectory'),
-        ),
-      ).thenReturn('packages/test_project');
-
-      final result = await buildRunner().run([
-        'create_subcommand',
-        'test_project',
-        '--workspace',
-      ]);
-
-      expect(result, equals(ExitCode.success.code));
-      verify(
-        () => integrator.addPackage(
-          workspaceRoot: any(named: 'workspaceRoot'),
-          packageDirectory: any(named: 'packageDirectory'),
-        ),
-      ).called(1);
-      verify(
-        () => logger.info(
-          'Added "packages/test_project" to the workspace at /ws.',
-        ),
-      ).called(1);
-    });
-
-    test('does not log when the package is already a member', () async {
-      when(
-        () => detector.detect(any()),
-      ).thenReturn(const WorkspaceContext(rootPath: '/ws', members: []));
-      when(
-        () => integrator.addPackage(
-          workspaceRoot: any(named: 'workspaceRoot'),
-          packageDirectory: any(named: 'packageDirectory'),
-        ),
-      ).thenReturn(null);
-
-      final result = await buildRunner().run([
-        'create_subcommand',
-        'test_project',
-        '--workspace',
-      ]);
-
-      expect(result, equals(ExitCode.success.code));
-      verifyNever(() => logger.info(any(that: contains('Added'))));
-    });
-
-    test('does not register when not inside a workspace', () async {
-      when(() => detector.detect(any())).thenReturn(null);
-
-      final result = await buildRunner().run([
-        'create_subcommand',
-        'test_project',
-        '--workspace',
-      ]);
-
-      expect(result, equals(ExitCode.success.code));
-      verifyNever(
-        () => integrator.addPackage(
-          workspaceRoot: any(named: 'workspaceRoot'),
-          packageDirectory: any(named: 'packageDirectory'),
-        ),
+    test('forwards workspace: true to the template vars', () async {
+      final command = _TestCreateSubCommand(
+        template: template,
+        logger: logger,
+        generatorFromBundle: (_) async => generator,
       );
-    });
 
-    test('does not register without the --workspace flag', () async {
-      final result = await buildRunner().run([
+      final result = await _TestCommandRunner(command: command).run([
         'create_subcommand',
         'test_project',
+        '--workspace',
       ]);
 
       expect(result, equals(ExitCode.success.code));
-      verifyNever(() => detector.detect(any()));
-    });
-
-    test('skips detection when registersInWorkspace is false', () async {
-      final result = await buildRunner(registersInWorkspace: false).run([
-        'create_subcommand',
-        'test_project',
-      ]);
-
-      expect(result, equals(ExitCode.success.code));
-      verifyNever(() => detector.detect(any()));
+      verify(
+        () => generator.generate(
+          any(),
+          vars: any(named: 'vars', that: containsPair('workspace', true)),
+          logger: logger,
+        ),
+      ).called(1);
     });
   });
 
@@ -763,7 +655,7 @@ Usage: very_good create create_subcommand <project-name> [arguments]
 -o, --output-directory    The desired output directory when creating a new project.
     --description         The description for this new project.
                           (defaults to "A Very Good Project created by Very Good CLI.")
-    --[no-]workspace      Register the new package in the surrounding pub workspace.
+    --[no-]workspace      Generate the project pre-configured as a pub workspace member.
     --org-name            The organization for this new project.
                           (defaults to "com.example.verygoodcore")
 
@@ -1071,7 +963,7 @@ Usage: very_good create create_subcommand <project-name> [arguments]
 -o, --output-directory             The desired output directory when creating a new project.
     --description                  The description for this new project.
                                    (defaults to "A Very Good Project created by Very Good CLI.")
-    --[no-]workspace               Register the new package in the surrounding pub workspace.
+    --[no-]workspace               Generate the project pre-configured as a pub workspace member.
 -t, --template                     The template used to generate this new project.
 
           [template1] (default)    template1 help
@@ -1243,7 +1135,7 @@ Usage: very_good create create_subcommand <project-name> [arguments]
 -o, --output-directory    The desired output directory when creating a new project.
     --description         The description for this new project.
                           (defaults to "A Very Good Project created by Very Good CLI.")
-    --[no-]workspace      Register the new package in the surrounding pub workspace.
+    --[no-]workspace      Generate the project pre-configured as a pub workspace member.
     --publishable         Whether the generated project is intended to be published.
 
 Run "runner help" to see global options.''';

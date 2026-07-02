@@ -33,7 +33,7 @@ Usage: very_good create flutter_package <project-name> [arguments]
 -o, --output-directory    The desired output directory when creating a new project.
     --description         The description for this new project.
                           (defaults to "A Very Good Project created by Very Good CLI.")
-    --[no-]workspace      Register the new package in the surrounding pub workspace.
+    --[no-]workspace      Generate the project pre-configured as a pub workspace member.
     --publishable         Whether the generated project is intended to be published.
 
 Run "very_good help" to see global options.''',
@@ -184,6 +184,7 @@ void main() {
             vars: <String, dynamic>{
               'project_name': 'my_flutter_package',
               'description': '',
+              'workspace': false,
               'publishable': false,
             },
             onVarsChanged: any(named: 'onVarsChanged'),
@@ -195,6 +196,7 @@ void main() {
             vars: <String, dynamic>{
               'project_name': 'my_flutter_package',
               'description': '',
+              'workspace': false,
               'publishable': false,
             },
             logger: logger,

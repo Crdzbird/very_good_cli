@@ -48,9 +48,8 @@ dart pub global run very_good_cli:very_good <command> <args>
 
 Create a very good project in seconds based on the provided template. Each template has a corresponding sub-command (e.g.,`very_good create flutter_app` will generate a Flutter starter app).
 
-> 🆕 **Multi-package workspaces**: use `very_good create workspace` to scaffold a
-> [pub workspace](https://dart.dev/tools/pub/workspaces), then add members with
-> the opt-in `--workspace` flag on any `create` subcommand. See
+> 🆕 **Monorepo support**: generate any project pre-configured as a pub
+> workspace member with the opt-in `--workspace` flag. See
 > [Workspaces](#workspaces) below.
 
 ![Very Good Create][very_good_create]
@@ -70,7 +69,6 @@ Available subcommands:
   flutter_app       Generate a Very Good Flutter application.
   flutter_package   Generate a Very Good Flutter package.
   flutter_plugin    Generate a Very Good Flutter plugin.
-  workspace         Generate a Very Good multi-package workspace.
 
 Run "very_good help" to see global options.
 ```
@@ -121,17 +119,9 @@ very_good create docs_site my_docs_site
 
 #### Workspaces
 
-`very_good create workspace` scaffolds a multi-package [pub workspace][pub_workspaces_link] — a root `pubspec.yaml` with a `workspace:` list plus `apps/` and `packages/` directories for its members.
+Generate any project pre-configured as a member of a [pub workspace][pub_workspaces_link] with the opt-in `--workspace` flag (available on every `create` subcommand, off by default). The flag is forwarded to the template as the `workspace` variable, so the generated project ships with the workspace-member configuration (`resolution: workspace`) out of the box — compatible with plain pub workspaces and monorepo tools built on top of them (e.g. melos):
 
 ```sh
-# Create a new multi-package workspace named my_workspace
-very_good create workspace my_workspace
-```
-
-Add members from inside the workspace with the opt-in `--workspace` flag (available on every `create` subcommand, off by default). It registers the new package in the root `workspace:` list and gives it `resolution: workspace`, so a single resolve covers the whole workspace:
-
-```sh
-cd my_workspace
 very_good create dart_package my_package -o packages --workspace
 very_good create flutter_app my_app -o apps --workspace
 ```

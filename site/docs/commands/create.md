@@ -24,7 +24,6 @@ Available subcommands:
   flutter_app       Generate a Very Good Flutter application.
   flutter_package   Generate a Very Good Flutter package.
   flutter_plugin    Generate a Very Good Flutter plugin.
-  workspace         Generate a Very Good multi-package workspace.
 
 Run "very_good help" to see global options.
 ```
@@ -85,26 +84,16 @@ and examples, see the individual template pages:
 
 ## Workspaces
 
-`very_good create workspace <name>` scaffolds a multi-package
-[pub workspace](https://dart.dev/tools/pub/workspaces) — a root `pubspec.yaml`
-with a `workspace:` list plus `apps/` and `packages/` directories for its
-members.
+Generate any project pre-configured as a member of a
+[pub workspace](https://dart.dev/tools/pub/workspaces) with the opt-in
+`--workspace` flag, available on every template subcommand (off by default).
+
+The flag is forwarded to the template as the `workspace` variable, so the
+generated project ships with the workspace-member configuration
+(`resolution: workspace`) out of the box — compatible with plain pub workspaces
+and monorepo tools built on top of them (e.g. melos):
 
 ```sh
-very_good create workspace my_workspace
-```
-
-Add members from inside the workspace with the `--workspace` flag. It registers
-the new package in the root `workspace:` list and gives it
-`resolution: workspace`, so a single `very_good packages get` at the root
-resolves everything:
-
-```sh
-cd my_workspace
 very_good create dart_package my_package -o packages --workspace
 very_good create flutter_app  my_app     -o apps     --workspace
 ```
-
-The `--workspace` / `--no-workspace` flag is available on every template
-subcommand. It defaults to off and is a no-op when you are not inside a
-workspace.

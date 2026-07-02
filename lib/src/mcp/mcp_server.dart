@@ -96,7 +96,6 @@ flame_game - Generate a Very Good Flame game.
 flutter_app - Generate a Very Good Flutter application.
 flutter_package - Generate a Very Good Flutter package.
 flutter_plugin - Generate a Very Good Flutter plugin.
-workspace - Generate a Very Good multi-package workspace.
 ''',
               values: [
                 'app_ui_package',
@@ -107,7 +106,6 @@ workspace - Generate a Very Good multi-package workspace.
                 'dart_cli',
                 'dart_package',
                 'docs_site',
-                'workspace',
               ],
             ),
             'name': StringSchema(description: 'Project name'),
@@ -140,6 +138,11 @@ Only available for subcommands: flutter_plugin with all values) and flame_game (
             'publishable': BooleanSchema(
               description: '''
 Whether package is intended for publishing (flutter_package, dart_package  only)''',
+            ),
+            'workspace': BooleanSchema(
+              description: '''
+Whether to generate the project pre-configured as a pub workspace member.
+(defaults to false)''',
             ),
             'executable-name': StringSchema(
               description: '''
@@ -349,6 +352,9 @@ Only one value can be selected.
     }
     if (args['publishable'] == true) {
       cliArgs.add('--publishable');
+    }
+    if (args['workspace'] == true) {
+      cliArgs.add('--workspace');
     }
     if (args['executable-name'] != null) {
       cliArgs.addAll(['--executable-name', args['executable-name']! as String]);

@@ -36,7 +36,7 @@ final expectedUsage = [
       '-o, --output-directory           The desired output directory when creating a new project.\n'
       '    --description                The description for this new project.\n'
       '                                 (defaults to "A Very Good Project created by Very Good CLI.")\n'
-      '    --[no-]workspace             Register the new package in the surrounding pub workspace.\n'
+      '    --[no-]workspace             Generate the project pre-configured as a pub workspace member.\n'
       '    --org-name                   The organization for this new project.\n'
       '                                 (defaults to "com.example.verygoodcore")\n'
       '    --publishable                Whether the generated project is intended to be published.\n'
@@ -202,6 +202,7 @@ void main() {
             vars: <String, dynamic>{
               'project_name': 'my_app',
               'description': '',
+              'workspace': false,
               'org_name': 'com.example.verygoodcore',
               'publishable': false,
               'platforms': ['android', 'ios', 'web', 'macos', 'windows'],
@@ -215,6 +216,7 @@ void main() {
             vars: <String, dynamic>{
               'project_name': 'my_app',
               'description': '',
+              'workspace': false,
               'org_name': 'com.example.verygoodcore',
               'publishable': false,
               'platforms': ['android', 'ios', 'web', 'macos', 'windows'],

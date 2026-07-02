@@ -78,14 +78,6 @@ class CreateCommand extends Command<int> {
         generatorFromBundle: generatorFromBundle,
       ),
     );
-
-    // very_good create workspace <args>
-    addSubcommand(
-      CreateWorkspace(
-        logger: logger,
-        generatorFromBundle: generatorFromBundle,
-      ),
-    );
   }
 
   @override

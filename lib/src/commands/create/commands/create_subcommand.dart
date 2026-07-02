@@ -8,7 +8,6 @@ import 'package:meta/meta.dart';
 import 'package:path/path.dart' as path;
 import 'package:very_good_cli/src/commands/commands.dart';
 import 'package:very_good_cli/src/commands/create/templates/templates.dart';
-import 'package:very_good_cli/src/workspace/workspace.dart';
 
 // A valid Dart identifier that can be used for a package, i.e. no
 // capital letters.
@@ -48,12 +47,7 @@ abstract class CreateSubCommand extends Command<int> {
   CreateSubCommand({
     required this.logger,
     @visibleForTesting required MasonGeneratorFromBundle? generatorFromBundle,
-    @visibleForTesting WorkspaceDetector? workspaceDetector,
-    @visibleForTesting WorkspaceIntegrator? workspaceIntegrator,
-  }) : _generatorFromBundle = generatorFromBundle ?? MasonGenerator.fromBundle,
-       _workspaceDetector = workspaceDetector ?? const WorkspaceDetector(),
-       _workspaceIntegrator =
-           workspaceIntegrator ?? const WorkspaceIntegrator() {
+  }) : _generatorFromBundle = generatorFromBundle ?? MasonGenerator.fromBundle {
     argParser
       ..addOption(
         'output-directory',
@@ -65,18 +59,14 @@ abstract class CreateSubCommand extends Command<int> {
         help: 'The description for this new project.',
         aliases: ['desc'],
         defaultsTo: _defaultDescription,
-      );
-
-    // Add the opt-in workspace wiring flag for templates that can be a member
-    // of a pub workspace.
-    if (registersInWorkspace) {
-      // Opt-in (defaults to false): never modify the workspace unless the user
-      // explicitly passes --workspace.
-      argParser.addFlag(
+      )
+      // Opt-in (defaults to false): forwarded to the template as the
+      // `workspace` variable so the generated project ships pre-configured
+      // as a pub workspace member.
+      ..addFlag(
         'workspace',
-        help: 'Register the new package in the surrounding pub workspace.',
+        help: 'Generate the project pre-configured as a pub workspace member.',
       );
-    }
 
     // Add the templates arg if the command has multiple templates.
     if (this is MultiTemplates) {
@@ -121,17 +111,14 @@ abstract class CreateSubCommand extends Command<int> {
   /// The logger user to notify the user of the command's progress.
   final Logger logger;
   final MasonGeneratorFromBundle _generatorFromBundle;
-  final WorkspaceDetector _workspaceDetector;
-  final WorkspaceIntegrator _workspaceIntegrator;
 
-  /// Whether the generated project should be registered as a member of the
-  /// surrounding [pub workspace][1] (if any) after creation.
+  /// Whether the generated project should be pre-configured as a member of a
+  /// [pub workspace][1].
   ///
-  /// Defaults to `true`. Subclasses that create a workspace themselves should
-  /// override this to `false` to avoid registering a workspace inside another.
+  /// Forwarded to the template as the `workspace` variable.
   ///
   /// [1]: https://dart.dev/tools/pub/workspaces
-  bool get registersInWorkspace => true;
+  bool get workspace => argResults['workspace'] as bool? ?? false;
 
   /// [ArgResults] which can be overridden for testing.
   @visibleForTesting
@@ -254,37 +241,7 @@ abstract class CreateSubCommand extends Command<int> {
 
     await template.onGenerateComplete(logger, outputDirectory);
 
-    if (registersInWorkspace && _workspaceWiringRequested) {
-      _registerInWorkspace();
-    }
-
     return ExitCode.success.code;
-  }
-
-  /// Whether the user opted in to workspace wiring via `--workspace`.
-  bool get _workspaceWiringRequested =>
-      argResults['workspace'] as bool? ?? false;
-
-  /// Registers the generated project as a member of the surrounding pub
-  /// workspace, if one is detected. No-op when the project is not created
-  /// inside a workspace.
-  void _registerInWorkspace() {
-    final workspace = _workspaceDetector.detect(outputDirectory.parent);
-    if (workspace == null) return;
-
-    final member = _workspaceIntegrator.addPackage(
-      workspaceRoot: Directory(workspace.rootPath),
-      packageDirectory: outputDirectory,
-    );
-    if (member == null) return;
-
-    // Ensure the new package participates in the workspace's shared
-    // resolution, so the workspace resolves without a manual edit.
-    _workspaceIntegrator.ensureWorkspaceResolution(
-      File(path.join(outputDirectory.path, 'pubspec.yaml')),
-    );
-
-    logger.info('Added "$member" to the workspace at ${workspace.rootPath}.');
   }
 
   /// Responsible for returns the template parameters to be passed to the
@@ -303,6 +260,7 @@ abstract class CreateSubCommand extends Command<int> {
     return <String, dynamic>{
       'project_name': projectName,
       'description': projectDescription,
+      'workspace': workspace,
       if (this is OrgName) 'org_name': (this as OrgName).orgName,
       if (this is Publishable) 'publishable': (this as Publishable).publishable,
     };
