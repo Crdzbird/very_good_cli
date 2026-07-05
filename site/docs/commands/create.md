@@ -98,6 +98,13 @@ very_good create dart_package my_package -o packages --workspace
 very_good create flutter_app  my_app     -o apps     --workspace
 ```
 
+:::note
+The flag is forwarded to the template as the `workspace` variable and takes
+effect once the bundled templates support it (see
+[very_good_templates](https://github.com/VeryGoodOpenSource/very_good_templates));
+with older templates it is accepted but has no effect on the generated files.
+:::
+
 ## Monorepos
 
 When a project is generated inside an existing git repository (e.g. a

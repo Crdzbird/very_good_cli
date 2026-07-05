@@ -65,9 +65,6 @@ abstract class CreateSubCommand extends Command<int> {
         aliases: ['desc'],
         defaultsTo: _defaultDescription,
       )
-      // Opt-in (defaults to false): forwarded to the template as the
-      // `workspace` variable so the generated project ships pre-configured
-      // as a pub workspace member.
       ..addFlag(
         'workspace',
         help: 'Generate the project pre-configured as a pub workspace member.',

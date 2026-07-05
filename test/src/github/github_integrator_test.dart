@@ -263,6 +263,110 @@ void main() {
       });
     });
 
+    group('workflow scoping', () {
+      test('keeps workflow names already scoped to the project', () {
+        writeSource('workflows/my_pkg.yaml', 'name: ci\n');
+        writeSource('workflows/my_pkg_android.yaml', 'name: android\n');
+
+        final summary = integrate();
+
+        expect(
+          summary.moved,
+          containsAll([
+            '.github/workflows/my_pkg.yaml',
+            '.github/workflows/my_pkg_android.yaml',
+          ]),
+        );
+        expect(rootHas('workflows/my_pkg_my_pkg.yaml'), isFalse);
+      });
+
+      test('scopes plain jobs via defaults.run.working-directory', () {
+        writeSource('workflows/main.yaml', '''
+name: main
+
+on: pull_request
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install Dependencies
+        run: npm ci
+''');
+
+        integrate();
+
+        final workflow =
+            loadYaml(readRoot('workflows/my_pkg.yaml'))
+                as Map<dynamic, dynamic>;
+        final build =
+            (workflow['jobs'] as Map<dynamic, dynamic>)['build']
+                as Map<dynamic, dynamic>;
+        expect(
+          ((build['defaults'] as Map<dynamic, dynamic>)['run']
+              as Map<dynamic, dynamic>)['working-directory'],
+          equals('packages/my_pkg'),
+        );
+        final setupNode = (build['steps'] as List)[1] as Map<dynamic, dynamic>;
+        expect(
+          (setupNode['with'] as Map<dynamic, dynamic>)['cache-dependency-path'],
+          equals('packages/my_pkg/package-lock.json'),
+        );
+      });
+
+      test('prefixes working directories the template already declares', () {
+        writeSource('workflows/main.yaml', '''
+name: ci
+
+on: pull_request
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: example
+    steps:
+      - uses: actions/checkout@v4
+      - run: flutter test
+
+  build:
+    uses: VeryGoodOpenSource/very_good_workflows/.github/workflows/flutter_package.yml@v1
+    with:
+      flutter_channel: stable
+      working_directory: sub_pkg
+''');
+
+        integrate();
+
+        final workflow =
+            loadYaml(readRoot('workflows/my_pkg.yaml'))
+                as Map<dynamic, dynamic>;
+        final jobs = workflow['jobs'] as Map<dynamic, dynamic>;
+        expect(
+          (((jobs['e2e'] as Map<dynamic, dynamic>)['defaults']
+                  as Map<dynamic, dynamic>)['run']
+              as Map<dynamic, dynamic>)['working-directory'],
+          equals('packages/my_pkg/example'),
+        );
+        final buildInputs =
+            (jobs['build'] as Map<dynamic, dynamic>)['with']
+                as Map<dynamic, dynamic>;
+        expect(
+          buildInputs['working_directory'],
+          equals('packages/my_pkg/sub_pkg'),
+        );
+        expect(buildInputs['flutter_channel'], equals('stable'));
+      });
+    });
+
     group('with an existing root .github', () {
       test('appends missing dependabot entries and enables beta', () {
         writeSource('dependabot.yaml', _dependabot);
@@ -284,7 +388,6 @@ updates:
         final updates = (dependabot['updates'] as List)
             .cast<Map<dynamic, dynamic>>();
         expect(updates, hasLength(2));
-        // The existing entry is respected (schedule untouched).
         expect(
           updates.first['schedule'],
           equals({'interval': 'weekly'}),
@@ -453,6 +556,40 @@ updates:
         expect(
           readRoot('ISSUE_TEMPLATE/config.yml'),
           equals('blank_issues_enabled: false'),
+        );
+      });
+
+      test('warns and leaves the source when root dependabot is malformed', () {
+        writeSource('dependabot.yaml', _dependabot);
+        writeRoot('dependabot.yaml', 'version: [unclosed');
+
+        final summary = integrate();
+
+        expect(summary.warnings, hasLength(1));
+        expect(
+          summary.warnings.single,
+          contains('Could not integrate .github/dependabot.yaml'),
+        );
+        expect(
+          File(
+            path.join(package.path, '.github', 'dependabot.yaml'),
+          ).existsSync(),
+          isTrue,
+        );
+      });
+
+      test('warns and leaves the source when root config.yml is malformed', () {
+        writeSource('ISSUE_TEMPLATE/config.yml', 'blank_issues_enabled: false');
+        writeRoot('ISSUE_TEMPLATE/config.yml', 'foo: [');
+
+        final summary = integrate();
+
+        expect(summary.warnings, hasLength(1));
+        expect(
+          File(
+            path.join(package.path, '.github', 'ISSUE_TEMPLATE', 'config.yml'),
+          ).existsSync(),
+          isTrue,
         );
       });
 

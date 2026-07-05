@@ -119,6 +119,13 @@ class GithubIntegrator {
     return summary;
   }
 
+  /// Routes [source] to its conflict resolution strategy, overwriting
+  /// `PULL_REQUEST_TEMPLATE.md`, `ISSUE_TEMPLATE/*.md`, and any unrecognized
+  /// file completely so the end user decides to commit or revert.
+  ///
+  /// A malformed file at the repository root never fails project generation:
+  /// it is reported as a warning and the generated file is left in the
+  /// package instead.
   void _integrateFile(
     File source, {
     required String relative,
@@ -129,24 +136,29 @@ class GithubIntegrator {
   }) {
     final basename = path.basename(relative);
 
-    if (basename == 'dependabot.yaml' || basename == 'dependabot.yml') {
-      _mergeDependabot(source, relative, rootGithub, packagePath, summary);
-    } else if (basename == 'cspell.json') {
-      _mergeCspell(source, relative, rootGithub, summary);
-    } else if (relative.startsWith('workflows/')) {
-      _relocateWorkflow(
-        source,
-        rootGithub: rootGithub,
-        packagePath: packagePath,
-        projectName: projectName,
-        summary: summary,
+    try {
+      if (basename == 'dependabot.yaml' || basename == 'dependabot.yml') {
+        _mergeDependabot(source, relative, rootGithub, packagePath, summary);
+      } else if (basename == 'cspell.json') {
+        _mergeCspell(source, relative, rootGithub, summary);
+      } else if (relative.startsWith('workflows/')) {
+        _relocateWorkflow(
+          source,
+          rootGithub: rootGithub,
+          packagePath: packagePath,
+          projectName: projectName,
+          summary: summary,
+        );
+      } else if (basename == 'config.yml' || basename == 'config.yaml') {
+        _mergeIssueTemplateConfig(source, relative, rootGithub, summary);
+      } else {
+        _overwrite(source, relative, rootGithub, summary);
+      }
+    } on Exception catch (error) {
+      summary.warnings.add(
+        'Could not integrate .github/$relative at the repository root '
+        '($error); the generated file was left in the package.',
       );
-    } else if (basename == 'config.yml' || basename == 'config.yaml') {
-      _mergeIssueTemplateConfig(source, relative, rootGithub, summary);
-    } else {
-      // PULL_REQUEST_TEMPLATE.md, ISSUE_TEMPLATE/*.md and any other file:
-      // overwrite completely; the end user decides to commit or revert.
-      _overwrite(source, relative, rootGithub, summary);
     }
   }
 
@@ -171,6 +183,13 @@ class GithubIntegrator {
     source.deleteSync();
   }
 
+  /// Merges the generated dependabot configuration into the repository root.
+  ///
+  /// Package ecosystems are pointed at the package directory, while
+  /// `github-actions` entries keep targeting `/` where the relocated
+  /// workflows live. The existing `version` and entries are respected: new
+  /// entries are only appended, and `enable-beta-ecosystems` is enabled when
+  /// a `pub` entry (a Dependabot beta ecosystem) is added.
   void _mergeDependabot(
     File source,
     String relative,
@@ -178,8 +197,6 @@ class GithubIntegrator {
     String packagePath,
     GithubIntegrationSummary summary,
   ) {
-    // Point package ecosystems at the package directory; workflow files live
-    // at the repository root, so `github-actions` entries keep targeting `/`.
     final sourceEditor = YamlEditor(source.readAsStringSync());
     final updates = sourceEditor.parseAt(['updates']) as YamlList;
     for (var i = 0; i < updates.length; i++) {
@@ -199,17 +216,17 @@ class GithubIntegrator {
       return;
     }
 
-    // Respect the existing `version` and entries; only append new ones.
     final targetEditor = YamlEditor(target.readAsStringSync());
     final updatesNode = targetEditor.parseAt([
       'updates',
     ], orElse: () => wrapAsYamlNode(null)).value;
-    if (updatesNode is! List) {
+    final List<Map<dynamic, dynamic>> existing;
+    if (updatesNode is List) {
+      existing = updatesNode.cast<Map<dynamic, dynamic>>();
+    } else {
+      existing = const [];
       targetEditor.update(['updates'], <dynamic>[]);
     }
-    final existing = updatesNode is List
-        ? updatesNode.cast<Map<dynamic, dynamic>>()
-        : <Map<dynamic, dynamic>>[];
     bool isPresent(Map<dynamic, dynamic> entry) => existing.any(
       (candidate) =>
           candidate['package-ecosystem'] == entry['package-ecosystem'] &&
@@ -226,7 +243,6 @@ class GithubIntegrator {
         ['updates'],
         json.decode(json.encode(entry)),
       );
-      // Dependabot's pub support requires the beta ecosystems opt-in.
       appendedBetaEcosystem =
           appendedBetaEcosystem || entry['package-ecosystem'] == 'pub';
     }
@@ -251,6 +267,9 @@ class GithubIntegrator {
     source.deleteSync();
   }
 
+  /// Merges the generated cspell configuration into the repository root: the
+  /// schema is corrected when it differs, and the Very Good dictionaries,
+  /// their definitions, and the package words are added when missing.
   void _mergeCspell(
     File source,
     String relative,
@@ -279,13 +298,11 @@ class GithubIntegrator {
 
     final original = json.encode(targetConfig);
 
-    // Verify the schema; overwrite when incorrect.
     if (sourceConfig[r'$schema'] != null &&
         targetConfig[r'$schema'] != sourceConfig[r'$schema']) {
       targetConfig[r'$schema'] = sourceConfig[r'$schema'];
     }
 
-    // Add the Very Good dictionaries (and their definitions) if missing.
     for (final key in ['dictionaries', 'words']) {
       final sourceValues = (sourceConfig[key] as List? ?? []).cast<String>();
       final targetValues = [
@@ -354,6 +371,13 @@ class GithubIntegrator {
     source.deleteSync();
   }
 
+  /// Relocates a generated workflow to the repository root under a
+  /// project-scoped name: `main.yaml` becomes `<project_name>.yaml`, other
+  /// workflows keep their purpose in the name (e.g.
+  /// `<project_name>_license_check.yaml`), and workflows already named after
+  /// the project keep their names. Residual conflicts are resolved with
+  /// `_1`, `_2`… suffixes, and identical files are skipped so re-runs stay
+  /// idempotent.
   void _relocateWorkflow(
     File source, {
     required Directory rootGithub,
@@ -364,9 +388,13 @@ class GithubIntegrator {
     final basename = path.basename(source.path);
     final extension = path.extension(basename);
     final stem = path.basenameWithoutExtension(basename);
-    // `main.yaml` becomes `<project_name>.yaml`; any other workflow keeps its
-    // purpose in the name (e.g. `<project_name>_license_check.yaml`).
-    final base = stem == 'main' ? projectName : '${projectName}_$stem';
+    final alreadyNamedAfterProject =
+        stem == projectName || stem.startsWith('${projectName}_');
+    final base = stem == 'main'
+        ? projectName
+        : alreadyNamedAfterProject
+        ? stem
+        : '${projectName}_$stem';
     final content = source.readAsStringSync();
 
     for (var attempt = 0; ; attempt++) {
@@ -380,11 +408,8 @@ class GithubIntegrator {
       );
       final target = File(path.join(rootGithub.path, 'workflows', candidate));
 
-      if (target.existsSync() && target.readAsStringSync() != transformed) {
-        continue;
-      }
-
       if (target.existsSync()) {
+        if (target.readAsStringSync() != transformed) continue;
         summary.skipped.add('.github/workflows/$candidate');
       } else {
         target
@@ -397,9 +422,11 @@ class GithubIntegrator {
     }
   }
 
-  /// Rewrites a generated workflow so it works from the repository root:
-  /// unique name, triggers scoped to the package, and reusable workflow
-  /// inputs pointed at the package directory.
+  /// Rewrites a generated workflow so it works from the repository root: a
+  /// unique name (which also keeps the `github.workflow` derived concurrency
+  /// group isolated per package), `push`/`pull_request` triggers scoped to
+  /// the package — including the scalar form (`on: pull_request`) used by the
+  /// docs site template — and jobs pointed at the package directory.
   String _transformWorkflow(
     String content, {
     required String workflowFileName,
@@ -408,25 +435,37 @@ class GithubIntegrator {
     final editor = YamlEditor(content);
     final workflow = loadYaml(content) as YamlMap;
 
-    // The concurrency group derives from `github.workflow`, so a unique name
-    // also keeps concurrency isolated per package.
     editor.update(['name'], path.basenameWithoutExtension(workflowFileName));
 
-    final triggers = workflow['on'] as YamlMap? ?? YamlMap();
+    final triggers = workflow['on'];
+    final defaultPaths = [
+      '$packagePath/**',
+      '.github/workflows/$workflowFileName',
+    ];
     for (final trigger in ['push', 'pull_request']) {
-      final definition = triggers[trigger];
-      if (definition is! YamlMap) continue;
-
-      final paths = definition['paths'] as YamlList?;
-      final scoped = paths == null
-          ? ['$packagePath/**', '.github/workflows/$workflowFileName']
-          : [
-              for (final entry in paths.cast<String>())
-                entry.startsWith('.github/')
-                    ? '.github/workflows/$workflowFileName'
-                    : '$packagePath/$entry',
-            ];
-      editor.update(['on', trigger, 'paths'], scoped);
+      if (triggers is String && triggers == trigger) {
+        editor.update(
+          ['on'],
+          {
+            trigger: {'paths': defaultPaths},
+          },
+        );
+      } else if (triggers is YamlMap && triggers.containsKey(trigger)) {
+        final definition = triggers[trigger] as YamlMap?;
+        final paths = definition?['paths'] as YamlList?;
+        final scoped = paths == null
+            ? defaultPaths
+            : [
+                for (final entry in paths.cast<String>())
+                  entry.startsWith('.github/')
+                      ? '.github/workflows/$workflowFileName'
+                      : '$packagePath/$entry',
+              ];
+        editor.update(
+          ['on', trigger],
+          json.decode(json.encode({...?definition, 'paths': scoped})),
+        );
+      }
     }
 
     final jobs = workflow['jobs'] as YamlMap? ?? YamlMap();
@@ -434,27 +473,92 @@ class GithubIntegrator {
       final job = entry.value;
       if (job is! YamlMap) continue;
       final uses = job['uses'] as String?;
-      if (uses == null || !uses.startsWith(_veryGoodWorkflowsPrefix)) continue;
 
-      final reusableWorkflow = path.basename(uses.split('@').first);
-      if (reusableWorkflow == _semanticPullRequestWorkflow) continue;
-
-      final inputs = {
-        ...?(job['with'] as YamlMap?),
-        // The spell check config must keep resolving at the repository root,
-        // so its `includes` glob is scoped instead.
-        if (reusableWorkflow == _spellCheckWorkflow)
-          'includes': '$packagePath/**/*.md'
-        else
-          'working_directory': packagePath,
-      };
-      editor.update(
-        ['jobs', entry.key, 'with'],
-        json.decode(json.encode(inputs)),
-      );
+      if (uses == null) {
+        _scopePlainJob(editor, entry.key, job, packagePath);
+      } else if (uses.startsWith(_veryGoodWorkflowsPrefix)) {
+        _scopeReusableWorkflowJob(editor, entry.key, job, uses, packagePath);
+      }
     }
 
     return editor.toString();
+  }
+
+  /// Points a job that calls a reusable Very Good workflow at the package
+  /// directory, preserving (and prefixing) any inputs the template already
+  /// provides.
+  void _scopeReusableWorkflowJob(
+    YamlEditor editor,
+    Object? jobName,
+    YamlMap job,
+    String uses,
+    String packagePath,
+  ) {
+    final reusableWorkflow = path.basename(uses.split('@').first);
+    if (reusableWorkflow == _semanticPullRequestWorkflow) return;
+
+    final existingInputs = job['with'] as YamlMap?;
+    final Map<String, dynamic> scopedInputs;
+    if (reusableWorkflow == _spellCheckWorkflow) {
+      final includes = existingInputs?['includes'] as String? ?? '**/*.md';
+      scopedInputs = {'includes': '$packagePath/$includes'};
+    } else {
+      final workingDirectory = existingInputs?['working_directory'] as String?;
+      scopedInputs = {
+        'working_directory': workingDirectory == null
+            ? packagePath
+            : '$packagePath/$workingDirectory',
+      };
+    }
+
+    editor.update(
+      ['jobs', jobName, 'with'],
+      json.decode(json.encode({...?existingInputs, ...scopedInputs})),
+    );
+  }
+
+  /// Scopes a job that runs its own steps (no reusable workflow) to the
+  /// package directory via `defaults.run.working-directory`, preserving (and
+  /// prefixing) any working directory the template already declares. Step
+  /// inputs that resolve from the repository root (`cache-dependency-path`)
+  /// are prefixed as well.
+  void _scopePlainJob(
+    YamlEditor editor,
+    Object? jobName,
+    YamlMap job,
+    String packagePath,
+  ) {
+    final defaults = job['defaults'] as YamlMap?;
+    final run = defaults?['run'] as YamlMap?;
+    final workingDirectory = run?['working-directory'] as String?;
+    editor.update(
+      ['jobs', jobName, 'defaults'],
+      json.decode(
+        json.encode({
+          ...?defaults,
+          'run': {
+            ...?run,
+            'working-directory': workingDirectory == null
+                ? packagePath
+                : '$packagePath/$workingDirectory',
+          },
+        }),
+      ),
+    );
+
+    final steps = job['steps'] as YamlList? ?? YamlList();
+    for (var i = 0; i < steps.length; i++) {
+      final step = steps[i];
+      if (step is! YamlMap) continue;
+      final inputs = step['with'] as YamlMap?;
+      final dependencyPath = inputs?['cache-dependency-path'];
+      if (dependencyPath is String) {
+        editor.update(
+          ['jobs', jobName, 'steps', i, 'with', 'cache-dependency-path'],
+          '$packagePath/$dependencyPath',
+        );
+      }
+    }
   }
 
   void _pruneEmptyDirectories(Directory directory) {

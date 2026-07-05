@@ -128,6 +128,8 @@ very_good create dart_package my_package -o packages --workspace
 very_good create flutter_app my_app -o apps --workspace
 ```
 
+> **Note**: the flag is forwarded to the template as the `workspace` variable and takes effect once the bundled templates support it (see [very_good_templates][very_good_templates_link]); with older templates it is accepted but has no effect on the generated files.
+
 #### Monorepos
 
 When a project is generated inside an existing git repository (e.g. a monorepo), its GitHub metadata is automatically integrated at the repository root — where GitHub actually reads it — resolving conflicts with any existing files:
@@ -277,3 +279,4 @@ Run "very_good help <command>" for more information about a command.
 [very_good_ventures_link]: https://verygood.ventures
 [path_setup_link]: https://dart.dev/tools/pub/cmd/pub-global#running-a-script-from-your-path
 [pub_workspaces_link]: https://dart.dev/tools/pub/workspaces
+[very_good_templates_link]: https://github.com/VeryGoodOpenSource/very_good_templates
